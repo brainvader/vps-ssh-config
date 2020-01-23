@@ -1,0 +1,79 @@
+- hosts: control_node
+  connection: local
+  gather_facts: False
+
+  vars_prompt:
+    - name: hostname
+      prompt: "Enter hostname"
+      private: no
+
+    - name: username
+      prompt: "Enter username"
+      private: no
+
+    - name: email
+      prompt: "Enter email"
+      private: no
+
+  vars:
+    vps_user: "root"
+    ssh_home: "/Users/{{ username }}/.ssh"
+    ssh_file_path: "{{ ssh_home }}/{{ hostname }}"
+    ansible_python_interpreter: /Users/brainvader/.pyenv/shims/python
+
+  tasks:
+    - name: obtain password from passwordstore
+      command: pass "{{ hostname }}/{{ vps_user }}"
+      register: password
+
+    - name: obtain passphrase from passwordstore
+      command: pass "{{ hostname }}/ssh"
+      register: passphrase
+
+    - name: reassing register vairable
+      set_fact:
+        passphrase: "{{ passphrase.stdout }}"
+
+    - name: reassing register vairable
+      set_fact:
+        password: "{{ password.stdout }}"
+
+    - debug:
+        msg: 
+            - "User Name: {{ vps_user }}"
+            - "Password: {{ password }}"
+            - "SSH HOME: {{ ssh_home }}"
+            - "SSH file path: {{ ssh_file_path }}"
+            - "passphrase: {{ passphrase }}"
+
+    - name: delete a subfolder for ssh key
+      file:
+        path: "{{ ssh_home }}/{{ hostname }}"
+        state: absent
+
+    - name: create a subfolder for ssh key
+      file:
+        path: "{{ ssh_file_path }}"
+        state: directory
+        owner: "{{ username }}"
+        group: staff
+        mode: '0755'
+
+    - name: generate ssh key
+      expect:
+        command: ssh-keygen -f {{ ssh_file_path }}/id_rsa -t rsa -b 4096 -C {{ email }}
+        responses:
+            (?i)passphrase: "{{ passphrase }}"
+
+    - name: save ssh passphrase to keychain
+      expect:
+        command: ssh-add -K {{ ssh_file_path }}/id_rsa
+        responses:
+            (?i)passphrase: "{{ passphrase }}"
+    #   when: ansible_os_family == 'Darwin'
+
+    - name: distribute authorized_keys to the taget node
+      expect:
+        command: ssh-copy-id -i {{ ssh_file_path }}/id_rsa.pub {{ hostname }}
+        responses:
+            (?i)password: "{{ password }}"
